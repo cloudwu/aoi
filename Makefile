@@ -1,2 +1,2 @@
 all:
-	gcc -o aoi.exe -g -Wall aoi.c test.c
+	gcc -o aoi -g -Wall aoi.c test.c
