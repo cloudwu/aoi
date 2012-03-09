@@ -75,7 +75,11 @@ static struct object *
 map_query(struct aoi_space *space, struct map * m, uint32_t id) {
 	uint32_t hash = id & (m->size-1);
 	struct map_slot *s = &m->slot[hash];
+	struct map_slot * empty = NULL;
 	for (;;) {
+		if (s->obj == NULL) {
+			empty = s;
+		}
 		if (s->id == id) {
 			if (s->obj == NULL) {
 				s->obj = new_object(space, id);
@@ -86,6 +90,11 @@ map_query(struct aoi_space *space, struct map * m, uint32_t id) {
 			break;
 		}
 		s=&m->slot[s->next];
+	}
+	if (empty) {
+		empty->id = id;
+		empty->obj = new_object(space, id);
+		return empty->obj;
 	}
 	int i;
 	for (i=0;i<m->size;i++) {
@@ -120,8 +129,9 @@ map_query(struct aoi_space *space, struct map * m, uint32_t id) {
 				if (new_slot[j].obj == NULL) {
 					new_slot[j].id = m->slot[i].id;
 					new_slot[j].obj = m->slot[i].obj;
-					new_slot[j].next = m->slot[i].next;
-					m->slot[i].next = j;
+					new_slot[j].next = s->next;
+					s->next = j;
+					break;
 				}
 			}
 		}
@@ -144,22 +154,25 @@ map_foreach(struct map * m , void (*func)(void *ud, struct object *obj), void *u
 	}
 }
 
-static void
-map_delete(struct map *m, uint32_t id) {
+static struct object *
+map_drop(struct map *m, uint32_t id) {
 	uint32_t hash = id & (m->size-1);
 	struct map_slot *s = &m->slot[hash];
 	for (;;) {
 		if (s->id == id) {
+			struct object * obj = s->obj;
 			s->obj = NULL;
-			return;
+			return obj;
 		}
-		assert(s->next >= 0);
+		if (s->next < 0) {
+			return NULL;
+		}
 		s=&m->slot[s->next];
 	}
 }
 
 static void
-delete_map(struct aoi_space *space, struct map * m) {
+map_delete(struct aoi_space *space, struct map * m) {
 	space->alloc(space->alloc_ud, m->slot, m->size * sizeof(struct map_slot));
 	space->alloc(space->alloc_ud, m , sizeof(*m));
 }
@@ -194,7 +207,7 @@ inline static void
 drop_object(struct aoi_space * space, struct object *obj) {
 	--obj->ref;
 	if (obj->ref <=0) {
-		map_delete(space->object, obj->id);
+		map_drop(space->object, obj->id);
 		delete_object(space, obj);
 	}
 }
@@ -243,7 +256,7 @@ delete_set(struct aoi_space *space, struct object_set * set) {
 void 
 aoi_release(struct aoi_space *space) {
 	map_foreach(space->object, delete_object, space);
-	delete_map(space, space->object);
+	map_delete(space, space->object);
 	delete_pair_list(space);
 	delete_set(space,space->watcher_static);
 	delete_set(space,space->marker_static);
