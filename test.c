@@ -16,7 +16,7 @@ my_alloc(void * ud, void *ptr, size_t sz) {
 		void *p = malloc(sz);
 		++ cookie->count;
 		cookie->current += sz;
-		if (cookie->max > cookie->current) {
+		if (cookie->max < cookie->current) {
 			cookie->max = cookie->current;
 		}
 //		printf("%p + %u\n",p, sz);
