@@ -400,7 +400,7 @@ set_push_back(struct aoi_space * space, struct object_set * set, struct object *
 		void * tmp =  set->slot;
 		set->slot = space->alloc(space->alloc_ud, NULL, cap * sizeof(struct object *));
 		memcpy(set->slot, tmp ,  set->cap * sizeof(struct object *));
-		space->alloc(space->alloc_ud, set->slot, set->cap * sizeof(struct object *));
+		space->alloc(space->alloc_ud, tmp, set->cap * sizeof(struct object *));
 		set->cap = cap;
 	}
 	set->slot[set->number] = obj;
