@@ -24,14 +24,14 @@ static void
 init(int number, int start) {
 	int i;
 	for (i=0;i<number;i++) {
-		INDEX[i] = i+start;
+		INDEX[i] = (i+start)*8;
 	}
 }
 
 static void
 mnew(struct map *m, uint32_t id) {
-	struct object * obj = map_query(SPACE , m , id);
 //	printf("new %u\n",id);
+	struct object * obj = map_query(SPACE , m , id);
 	assert(obj->id == id);
 	assert(obj->ref == 1);
 }

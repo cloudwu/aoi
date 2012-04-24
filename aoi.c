@@ -8,6 +8,7 @@
 
 #define AOI_RADIS 10.0f
 
+#define INVALID_ID (~0)
 #define PRE_ALLOC 16
 #define AOI_RADIS2 (AOI_RADIS * AOI_RADIS)
 #define DIST2(p1,p2) ((p1[0] - p2[0]) * (p1[0] - p2[0]) + (p1[1] - p2[1]) * (p1[1] - p2[1]) + (p1[2] - p2[2]) * (p1[2] - p2[2]))
@@ -47,6 +48,7 @@ struct map_slot {
 
 struct map {
 	int size;
+	int lastfree;
 	struct map_slot * slot;
 };
 
@@ -71,15 +73,80 @@ new_object(struct aoi_space * space, uint32_t id) {
 	return obj;
 }
 
+static inline struct map_slot *
+mainposition(struct map *m , uint32_t id) {
+	uint32_t hash = id & (m->size-1);
+	return &m->slot[hash];
+}
+
+static void rehash(struct aoi_space * space, struct map *m);
+
+static void
+map_insert(struct aoi_space * space , struct map * m, uint32_t id , struct object *obj) {
+	struct map_slot *s = mainposition(m,id);
+	if (s->id == INVALID_ID) {
+		s->id = id;
+		s->obj = obj;
+		return;
+	}
+	if (mainposition(m, s->id) != s) {
+		struct map_slot * last = mainposition(m,s->id);
+		while (last->next != s - m->slot) {
+			assert(last->next >= 0);
+			last = &m->slot[last->next];
+		}
+		uint32_t temp_id = s->id;
+		struct object * temp_obj = s->obj;
+		last->next = s->next;
+		s->id = id;
+		s->obj = obj;
+		s->next = -1;
+		if (temp_obj) {
+			map_insert(space, m, temp_id, temp_obj);
+		}
+		return;
+	}
+	while (m->lastfree >= 0) {
+		struct map_slot * temp = &m->slot[m->lastfree--];
+		if (temp->id == INVALID_ID) {
+			temp->id = id;
+			temp->obj = obj;
+			temp->next = s->next;
+			s->next = (int)(temp - m->slot);
+			return;
+		}
+	}
+	rehash(space,m);
+	map_insert(space, m, id , obj);
+}
+
+static void
+rehash(struct aoi_space * space, struct map *m) {
+	struct map_slot * old_slot = m->slot;
+	int old_size = m->size;
+	m->size = 2 * old_size;
+	m->lastfree = m->size - 1;
+	m->slot = space->alloc(space->alloc_ud, NULL, m->size * sizeof(struct map_slot));
+	int i;
+	for (i=0;i<m->size;i++) {
+		struct map_slot * s = &m->slot[i];
+		s->id = INVALID_ID;
+		s->obj = NULL;
+		s->next = -1;
+	}
+	for (i=0;i<old_size;i++) {
+		struct map_slot * s = &old_slot[i];
+		if (s->obj) {
+			map_insert(space, m, s->id, s->obj);
+		}
+	}
+	space->alloc(space->alloc_ud, old_slot, old_size * sizeof(struct map_slot));
+}
+
 static struct object *
 map_query(struct aoi_space *space, struct map * m, uint32_t id) {
-	uint32_t hash = id & (m->size-1);
-	struct map_slot *s = &m->slot[hash];
-	struct map_slot * empty = NULL;
+	struct map_slot *s = mainposition(m, id);
 	for (;;) {
-		if (s->obj == NULL) {
-			empty = s;
-		}
 		if (s->id == id) {
 			if (s->obj == NULL) {
 				s->obj = new_object(space, id);
@@ -91,57 +158,9 @@ map_query(struct aoi_space *space, struct map * m, uint32_t id) {
 		}
 		s=&m->slot[s->next];
 	}
-	if (empty) {
-		empty->id = id;
-		empty->obj = new_object(space, id);
-		return empty->obj;
-	}
-	int i;
-	for (i=0;i<m->size;i++) {
-		if (m->slot[i].obj == NULL) {
-			s->next = i;
-			m->slot[i].id = id;
-			m->slot[i].obj = new_object(space, id);
-			return m->slot[i].obj;
-		}
-	}
-	int nsz = m->size * 2;
-	struct map_slot *new_slot = space->alloc(space->alloc_ud, NULL, nsz * sizeof(struct map_slot));
-	for (i=0;i<nsz;i++) {
-		struct map_slot * s = &new_slot[i];
-		s->id = 0;
-		s->obj = NULL;
-		s->next = -1;
-	}
-	hash = id & (nsz-1);
-	new_slot[hash].id = id;
-	new_slot[hash].obj = new_object(space, id);
-
-	for (i=0;i<m->size;i++) {
-		hash = m->slot[i].id & (nsz-1);
-		struct map_slot *s = &new_slot[hash];
-		if (s->obj == NULL) {
-			s->id = m->slot[i].id;
-			s->obj = m->slot[i].obj;
-		} else {
-			int j;
-			for (j=0;j<nsz;j++) {
-				if (new_slot[j].obj == NULL) {
-					new_slot[j].id = m->slot[i].id;
-					new_slot[j].obj = m->slot[i].obj;
-					new_slot[j].next = s->next;
-					s->next = j;
-					break;
-				}
-			}
-		}
-	}
-
-	space->alloc(space->alloc_ud, m->slot, m->size * sizeof(struct map_slot));
-	m->slot = new_slot;
-	m->size = nsz;
-
-	return new_slot[id & (nsz-1)].obj;
+	struct object * obj = new_object(space, id);
+	map_insert(space, m , id , obj);
+	return obj;
 }
 
 static void
@@ -182,10 +201,11 @@ map_new(struct aoi_space *space) {
 	int i;
 	struct map * m = space->alloc(space->alloc_ud, NULL, sizeof(*m));
 	m->size = PRE_ALLOC;
+	m->lastfree = PRE_ALLOC - 1;
 	m->slot = space->alloc(space->alloc_ud, NULL, m->size * sizeof(struct map_slot));
 	for (i=0;i<m->size;i++) {
 		struct map_slot * s = &m->slot[i];
-		s->id = 0;
+		s->id = INVALID_ID;
 		s->obj = NULL;
 		s->next = -1;
 	}
