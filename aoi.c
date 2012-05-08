@@ -362,7 +362,11 @@ aoi_update(struct aoi_space * space , uint32_t id, const char * modestring , flo
 			return;
 		}
 	}
-	obj->mode &= ~MODE_DROP;
+
+	if (obj->mode & MODE_DROP) {
+		obj->mode &= ~MODE_DROP;
+		grab_object(obj);
+	}
 
 	bool changed = change_mode(obj, set_watcher, set_marker);
 
