@@ -357,8 +357,10 @@ aoi_update(struct aoi_space * space , uint32_t id, const char * modestring , flo
 			set_marker = true;
 			break;
 		case 'd':
-			obj->mode = MODE_DROP;
-			drop_object(space, obj);
+			if (obj->mode & MODE_DROP) {
+				obj->mode = MODE_DROP;
+				drop_object(space, obj);
+			}
 			return;
 		}
 	}
